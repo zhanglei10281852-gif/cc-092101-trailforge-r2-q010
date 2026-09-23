@@ -49,6 +49,12 @@ class Database:
         @event.listens_for(engine, "connect")
         def set_pragmas(connection: sqlite3.Connection, record: Any) -> None:
             del record
+            # Put pysqlite in autocommit mode so SQLAlchemy emits explicit
+            # transaction boundaries. With the driver's legacy isolation mode no
+            # BEGIN precedes a SAVEPOINT, and RELEASE-ing the outermost savepoint
+            # commits in SQLite -- which would defeat the outer rollback of a
+            # failed request (leaving idempotency placeholders behind).
+            connection.isolation_level = None
             cursor = connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute(f"PRAGMA busy_timeout={timeout_ms}")
@@ -56,6 +62,10 @@ class Database:
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
+
+        @event.listens_for(engine, "begin")
+        def emit_begin(connection: Any) -> None:
+            connection.exec_driver_sql("BEGIN")
 
     def create_schema(self) -> None:
         from trailforge.models import load_all_models

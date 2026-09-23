@@ -168,12 +168,9 @@ class ExpeditionService(ServiceBase):
 
     def register(self, expedition_id: int, data: RegistrationCreate) -> RegistrationResponse:
         scope = f"expedition:{expedition_id}:register"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            registration = self.session.get(ExpeditionRegistration, prior.resource_id)
-            if registration is None:
-                raise ConflictError("idempotency record references a missing registration")
-            return RegistrationResponse.model_validate(registration)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(RegistrationResponse, lease.replay)
         expedition = self.expeditions.get_detail(expedition_id, for_update=True)
         if expedition is None:
             raise NotFoundError(f"Expedition {expedition_id} was not found")
@@ -233,13 +230,11 @@ class ExpeditionService(ServiceBase):
             apply_version(registration, None)
         self.session.flush()
         response = RegistrationResponse.model_validate(registration)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="expedition_registration",
             resource_id=registration.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=user.id,
@@ -254,12 +249,9 @@ class ExpeditionService(ServiceBase):
 
     def withdraw(self, expedition_id: int, data: WithdrawalRequest) -> RegistrationResponse:
         scope = f"expedition:{expedition_id}:withdraw"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            registration = self.session.get(ExpeditionRegistration, prior.resource_id)
-            if registration is None:
-                raise ConflictError("idempotency record references a missing registration")
-            return RegistrationResponse.model_validate(registration)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(RegistrationResponse, lease.replay)
         expedition = self.expeditions.get_detail(expedition_id, for_update=True)
         if expedition is None:
             raise NotFoundError(f"Expedition {expedition_id} was not found")
@@ -285,13 +277,11 @@ class ExpeditionService(ServiceBase):
         self.session.flush()
         self._promote_waitlist(expedition.id)
         response = RegistrationResponse.model_validate(registration)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="expedition_registration",
             resource_id=registration.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=data.user_id,

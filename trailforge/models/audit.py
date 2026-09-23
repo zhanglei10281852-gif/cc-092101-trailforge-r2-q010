@@ -32,14 +32,18 @@ class IdempotencyRecord(IntegerPrimaryKeyMixin, Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (
         UniqueConstraint("scope", "idempotency_key", name="uq_idempotency_scope_key"),
+        Index("ix_idempotency_status_locked", "status", "locked_at"),
     )
 
     scope: Mapped[str] = mapped_column(String(100), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(80), nullable=False)
-    resource_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    resource_id: Mapped[int | None] = mapped_column(Integer)
     response_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="completed", nullable=False)
+    locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now, nullable=False)
 
 

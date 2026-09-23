@@ -74,12 +74,9 @@ class GearService(ServiceBase):
 
     def create_inventory(self, data: GearInventoryCreate) -> GearInventoryResponse:
         scope = "gear:inventory:create"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            inventory = self.gear.get_inventory(prior.resource_id)
-            if inventory is None:
-                raise ConflictError("idempotency record references missing inventory")
-            return GearInventoryResponse.model_validate(inventory)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(GearInventoryResponse, lease.replay)
         catalog = self.gear.get_catalog(data.catalog_id)
         if catalog is None:
             raise NotFoundError(f"GearCatalog {data.catalog_id} was not found")
@@ -112,13 +109,11 @@ class GearService(ServiceBase):
         self.session.add(movement)
         self.session.flush()
         response = GearInventoryResponse.model_validate(inventory)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="gear_inventory",
             resource_id=inventory.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=data.actor_id,
@@ -134,12 +129,9 @@ class GearService(ServiceBase):
         self, inventory_id: int, data: InventoryAdjustment
     ) -> GearInventoryResponse:
         scope = f"gear:inventory:{inventory_id}:adjust"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            inventory = self.gear.get_inventory(inventory_id)
-            if inventory is None:
-                raise NotFoundError(f"GearInventory {inventory_id} was not found")
-            return GearInventoryResponse.model_validate(inventory)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(GearInventoryResponse, lease.replay)
         inventory = self.gear.get_inventory(inventory_id, for_update=True)
         if inventory is None:
             raise NotFoundError(f"GearInventory {inventory_id} was not found")
@@ -170,13 +162,11 @@ class GearService(ServiceBase):
         self.session.add(movement)
         self.session.flush()
         response = GearInventoryResponse.model_validate(inventory)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="gear_inventory",
             resource_id=inventory.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=data.actor_id,
@@ -192,12 +182,9 @@ class GearService(ServiceBase):
 
     def loan(self, data: GearLoanCreate) -> GearLoanResponse:
         scope = f"gear:inventory:{data.inventory_id}:loan"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            loan = self.gear.get_loan(prior.resource_id)
-            if loan is None:
-                raise ConflictError("idempotency record references missing loan")
-            return GearLoanResponse.model_validate(loan)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(GearLoanResponse, lease.replay)
         inventory = self.gear.get_inventory(data.inventory_id, for_update=True)
         if inventory is None:
             raise NotFoundError(f"GearInventory {data.inventory_id} was not found")
@@ -240,13 +227,11 @@ class GearService(ServiceBase):
         )
         self.session.add(movement)
         response = GearLoanResponse.model_validate(loan)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="gear_loan",
             resource_id=loan.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=data.actor_id,
@@ -261,12 +246,9 @@ class GearService(ServiceBase):
 
     def return_loan(self, loan_id: int, data: GearLoanReturn) -> GearLoanResponse:
         scope = f"gear:loan:{loan_id}:return"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            loan = self.gear.get_loan(loan_id)
-            if loan is None:
-                raise NotFoundError(f"GearLoan {loan_id} was not found")
-            return GearLoanResponse.model_validate(loan)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(GearLoanResponse, lease.replay)
         loan = self.gear.get_loan(loan_id, for_update=True)
         if loan is None:
             raise NotFoundError(f"GearLoan {loan_id} was not found")
@@ -307,13 +289,11 @@ class GearService(ServiceBase):
         )
         self.session.add(movement)
         response = GearLoanResponse.model_validate(loan)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="gear_loan",
             resource_id=loan.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=data.actor_id,

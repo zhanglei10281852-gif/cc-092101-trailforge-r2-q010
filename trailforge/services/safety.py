@@ -79,12 +79,9 @@ class SafetyService(ServiceBase):
 
     def submit_check_in(self, check_in_id: int, data: CheckInSubmit) -> CheckInResponse:
         scope = f"safety:check-in:{check_in_id}:submit"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            check_in = self.safety.get_check_in(check_in_id)
-            if check_in is None:
-                raise ConflictError("idempotency record references missing check-in")
-            return CheckInResponse.model_validate(check_in)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(CheckInResponse, lease.replay)
         check_in = self.safety.get_check_in(check_in_id, for_update=True)
         if check_in is None:
             raise NotFoundError(f"ItineraryCheckIn {check_in_id} was not found")
@@ -99,13 +96,11 @@ class SafetyService(ServiceBase):
         check_in.late_minutes = max(int(delta_seconds // 60), 0)
         self.session.flush()
         response = CheckInResponse.model_validate(check_in)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="itinerary_check_in",
             resource_id=check_in.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=check_in.user_id,
@@ -148,12 +143,9 @@ class SafetyService(ServiceBase):
 
     def record_incident(self, data: EmergencyIncidentCreate) -> EmergencyIncidentResponse:
         scope = f"safety:expedition:{data.expedition_id}:incident"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            incident = self.safety.get_incident(prior.resource_id)
-            if incident is None:
-                raise ConflictError("idempotency record references missing incident")
-            return EmergencyIncidentResponse.model_validate(incident)
+        lease = self.begin_idempotent(scope=scope, key=data.idempotency_key, payload=data)
+        if lease.is_replay:
+            return self.restore_response(EmergencyIncidentResponse, lease.replay)
         expedition = self.expeditions.get(data.expedition_id)
         if expedition is None:
             raise NotFoundError(f"Expedition {data.expedition_id} was not found")
@@ -165,13 +157,11 @@ class SafetyService(ServiceBase):
         self.session.add(incident)
         self.session.flush()
         response = EmergencyIncidentResponse.model_validate(incident)
-        self.save_idempotent(
-            scope=scope,
-            key=data.idempotency_key,
-            payload=data,
+        self.complete_idempotent(
+            lease,
             resource_type="emergency_incident",
             resource_id=incident.id,
-            response=response.model_dump(mode="json"),
+            response=response,
         )
         self.audit(
             actor_id=data.reported_by,
