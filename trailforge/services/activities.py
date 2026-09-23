@@ -168,12 +168,17 @@ class ExpeditionService(ServiceBase):
 
     def register(self, expedition_id: int, data: RegistrationCreate) -> RegistrationResponse:
         scope = f"expedition:{expedition_id}:register"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            registration = self.session.get(ExpeditionRegistration, prior.resource_id)
-            if registration is None:
-                raise ConflictError("idempotency record references a missing registration")
-            return RegistrationResponse.model_validate(registration)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=RegistrationResponse,
+            operation=lambda: self._register_once(expedition_id, data, scope),
+        )
+
+    def _register_once(
+        self, expedition_id: int, data: RegistrationCreate, scope: str
+    ) -> RegistrationResponse:
         expedition = self.expeditions.get_detail(expedition_id, for_update=True)
         if expedition is None:
             raise NotFoundError(f"Expedition {expedition_id} was not found")
@@ -254,12 +259,17 @@ class ExpeditionService(ServiceBase):
 
     def withdraw(self, expedition_id: int, data: WithdrawalRequest) -> RegistrationResponse:
         scope = f"expedition:{expedition_id}:withdraw"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            registration = self.session.get(ExpeditionRegistration, prior.resource_id)
-            if registration is None:
-                raise ConflictError("idempotency record references a missing registration")
-            return RegistrationResponse.model_validate(registration)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=RegistrationResponse,
+            operation=lambda: self._withdraw_once(expedition_id, data, scope),
+        )
+
+    def _withdraw_once(
+        self, expedition_id: int, data: WithdrawalRequest, scope: str
+    ) -> RegistrationResponse:
         expedition = self.expeditions.get_detail(expedition_id, for_update=True)
         if expedition is None:
             raise NotFoundError(f"Expedition {expedition_id} was not found")

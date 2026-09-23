@@ -79,12 +79,17 @@ class SafetyService(ServiceBase):
 
     def submit_check_in(self, check_in_id: int, data: CheckInSubmit) -> CheckInResponse:
         scope = f"safety:check-in:{check_in_id}:submit"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            check_in = self.safety.get_check_in(check_in_id)
-            if check_in is None:
-                raise ConflictError("idempotency record references missing check-in")
-            return CheckInResponse.model_validate(check_in)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=CheckInResponse,
+            operation=lambda: self._submit_check_in_once(check_in_id, data, scope),
+        )
+
+    def _submit_check_in_once(
+        self, check_in_id: int, data: CheckInSubmit, scope: str
+    ) -> CheckInResponse:
         check_in = self.safety.get_check_in(check_in_id, for_update=True)
         if check_in is None:
             raise NotFoundError(f"ItineraryCheckIn {check_in_id} was not found")
@@ -148,12 +153,17 @@ class SafetyService(ServiceBase):
 
     def record_incident(self, data: EmergencyIncidentCreate) -> EmergencyIncidentResponse:
         scope = f"safety:expedition:{data.expedition_id}:incident"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            incident = self.safety.get_incident(prior.resource_id)
-            if incident is None:
-                raise ConflictError("idempotency record references missing incident")
-            return EmergencyIncidentResponse.model_validate(incident)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=EmergencyIncidentResponse,
+            operation=lambda: self._record_incident_once(data, scope),
+        )
+
+    def _record_incident_once(
+        self, data: EmergencyIncidentCreate, scope: str
+    ) -> EmergencyIncidentResponse:
         expedition = self.expeditions.get(data.expedition_id)
         if expedition is None:
             raise NotFoundError(f"Expedition {data.expedition_id} was not found")

@@ -74,12 +74,17 @@ class GearService(ServiceBase):
 
     def create_inventory(self, data: GearInventoryCreate) -> GearInventoryResponse:
         scope = "gear:inventory:create"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            inventory = self.gear.get_inventory(prior.resource_id)
-            if inventory is None:
-                raise ConflictError("idempotency record references missing inventory")
-            return GearInventoryResponse.model_validate(inventory)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=GearInventoryResponse,
+            operation=lambda: self._create_inventory_once(data, scope),
+        )
+
+    def _create_inventory_once(
+        self, data: GearInventoryCreate, scope: str
+    ) -> GearInventoryResponse:
         catalog = self.gear.get_catalog(data.catalog_id)
         if catalog is None:
             raise NotFoundError(f"GearCatalog {data.catalog_id} was not found")
@@ -134,12 +139,17 @@ class GearService(ServiceBase):
         self, inventory_id: int, data: InventoryAdjustment
     ) -> GearInventoryResponse:
         scope = f"gear:inventory:{inventory_id}:adjust"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            inventory = self.gear.get_inventory(inventory_id)
-            if inventory is None:
-                raise NotFoundError(f"GearInventory {inventory_id} was not found")
-            return GearInventoryResponse.model_validate(inventory)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=GearInventoryResponse,
+            operation=lambda: self._adjust_inventory_once(inventory_id, data, scope),
+        )
+
+    def _adjust_inventory_once(
+        self, inventory_id: int, data: InventoryAdjustment, scope: str
+    ) -> GearInventoryResponse:
         inventory = self.gear.get_inventory(inventory_id, for_update=True)
         if inventory is None:
             raise NotFoundError(f"GearInventory {inventory_id} was not found")
@@ -192,12 +202,15 @@ class GearService(ServiceBase):
 
     def loan(self, data: GearLoanCreate) -> GearLoanResponse:
         scope = f"gear:inventory:{data.inventory_id}:loan"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            loan = self.gear.get_loan(prior.resource_id)
-            if loan is None:
-                raise ConflictError("idempotency record references missing loan")
-            return GearLoanResponse.model_validate(loan)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=GearLoanResponse,
+            operation=lambda: self._loan_once(data, scope),
+        )
+
+    def _loan_once(self, data: GearLoanCreate, scope: str) -> GearLoanResponse:
         inventory = self.gear.get_inventory(data.inventory_id, for_update=True)
         if inventory is None:
             raise NotFoundError(f"GearInventory {data.inventory_id} was not found")
@@ -261,12 +274,17 @@ class GearService(ServiceBase):
 
     def return_loan(self, loan_id: int, data: GearLoanReturn) -> GearLoanResponse:
         scope = f"gear:loan:{loan_id}:return"
-        prior = self.find_idempotent(scope=scope, key=data.idempotency_key, payload=data)
-        if prior is not None:
-            loan = self.gear.get_loan(loan_id)
-            if loan is None:
-                raise NotFoundError(f"GearLoan {loan_id} was not found")
-            return GearLoanResponse.model_validate(loan)
+        return self.execute_idempotent(
+            scope=scope,
+            key=data.idempotency_key,
+            payload=data,
+            response_type=GearLoanResponse,
+            operation=lambda: self._return_loan_once(loan_id, data, scope),
+        )
+
+    def _return_loan_once(
+        self, loan_id: int, data: GearLoanReturn, scope: str
+    ) -> GearLoanResponse:
         loan = self.gear.get_loan(loan_id, for_update=True)
         if loan is None:
             raise NotFoundError(f"GearLoan {loan_id} was not found")

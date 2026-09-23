@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
-from sqlalchemy import Engine, event
+from sqlalchemy import Connection, Engine, event
 from sqlalchemy import create_engine as sqlalchemy_create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,6 +18,12 @@ from trailforge.database.base import Base
 from trailforge.errors import DatabaseBusyError
 
 T = TypeVar("T")
+
+
+def is_sqlite_busy_error(exc: OperationalError) -> bool:
+    """Return True for SQLite lock contention (busy timeout or stale WAL snapshot)."""
+    message = str(exc).lower()
+    return "database is locked" in message or "database is busy" in message
 
 
 class Database:
@@ -56,6 +62,16 @@ class Database:
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
+
+        @event.listens_for(engine, "begin")
+        def begin_transaction(connection: Connection) -> None:
+            # The sqlite3 driver otherwise begins transactions lazily at the
+            # first DML statement: reads run in autocommit mode with
+            # per-statement snapshots, and a SAVEPOINT issued before the first
+            # write commits independently on RELEASE. Begin every transaction
+            # explicitly so each session is a single atomic unit with one
+            # consistent read snapshot.
+            connection.exec_driver_sql("BEGIN")
 
     def create_schema(self) -> None:
         from trailforge.models import load_all_models
@@ -105,8 +121,7 @@ class Database:
 
     @staticmethod
     def _is_busy(exc: OperationalError) -> bool:
-        message = str(exc).lower()
-        return "database is locked" in message or "database is busy" in message
+        return is_sqlite_busy_error(exc)
 
     def verify_connection(self) -> dict[str, str | int]:
         with self.engine.connect() as connection:
